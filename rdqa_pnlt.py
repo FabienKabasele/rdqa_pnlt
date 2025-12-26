@@ -1365,7 +1365,9 @@ def load_data():
 # ============================================================================
 
 def main():
-    # En-tête principal
+    # ============================================================================
+    # EN-TÊTE PRINCIPAL
+    # ============================================================================
     col_logo, col_title = st.columns([1, 4])
     
     with col_logo:
@@ -1374,7 +1376,146 @@ def main():
     with col_title:
         st.markdown('<h1 class="main-header">📊 TABLEAU DE BORD RDQA - PNLT RDC</h1>', unsafe_allow_html=True)
     
-    # Onglets principaux
+    # ============================================================================
+    # CHARGEMENT DES DONNÉES
+    # ============================================================================
+    if 'df_bczs' not in st.session_state or 'df_cdt' not in st.session_state:
+        with st.spinner('Chargement des données depuis le repository...'):
+            df_bczs, df_cdt = load_data()
+    else:
+        df_bczs = st.session_state.df_bczs
+        df_cdt = st.session_state.get('df_cdt', pd.DataFrame())
+    
+    # ============================================================================
+    # SIDEBAR - FILTRES ET NAVIGATION
+    # ============================================================================
+    with st.sidebar:
+        st.markdown("## 🎯 NAVIGATION PAR PROVINCE")
+        st.markdown("---")
+        
+        # Option pour voir toutes les provinces
+        all_provinces_option = "Toutes les provinces"
+        
+        # Détecter les provinces disponibles
+        provinces_list = [all_provinces_option]
+        
+        if not df_bczs.empty and 'q010b' in df_bczs.columns:
+            # Extraire les provinces uniques de BCZS
+            bczs_provinces = df_bczs['q010b'].dropna().unique().tolist()
+            provinces_list.extend(sorted(set(bczs_provinces)))
+        elif not df_cdt.empty and 'q010b' in df_cdt.columns:
+            # Extraire les provinces uniques de CDT
+            cdt_provinces = df_cdt['q010b'].dropna().unique().tolist()
+            provinces_list.extend(sorted(set(cdt_provinces)))
+        
+        # Sélecteur de province
+        selected_province = st.selectbox(
+            "Sélectionnez une province:",
+            provinces_list,
+            key="province_selector",
+            help="Filtrer les données par province"
+        )
+        
+        # Filtre par zone de santé si une province est sélectionnée
+        selected_zone = "Toutes les zones"
+        if selected_province != all_provinces_option:
+            if not df_bczs.empty and 'q010b' in df_bczs.columns and 'q011b' in df_bczs.columns:
+                # Filtrer les zones pour la province sélectionnée
+                zones_in_province = df_bczs[df_bczs['q010b'] == selected_province]['q011b'].dropna().unique()
+                zones_list = ["Toutes les zones"] + sorted(zones_in_province.tolist())
+                
+                selected_zone = st.selectbox(
+                    "Sélectionnez une zone de santé:",
+                    zones_list,
+                    key="zone_selector",
+                    help="Filtrer les données par zone de santé"
+                )
+        
+        st.markdown("---")
+        
+        # ============================================================================
+        # STATISTIQUES RAPIDES
+        # ============================================================================
+        st.markdown("### 📊 STATISTIQUES")
+        
+        # Appliquer les filtres pour les statistiques
+        df_bczs_filtered = df_bczs.copy()
+        df_cdt_filtered = df_cdt.copy()
+        
+        if selected_province != all_provinces_option:
+            if not df_bczs.empty and 'q010b' in df_bczs.columns:
+                df_bczs_filtered = df_bczs_filtered[df_bczs_filtered['q010b'] == selected_province]
+            
+            if not df_cdt.empty and 'q010b' in df_cdt.columns:
+                df_cdt_filtered = df_cdt_filtered[df_cdt_filtered['q010b'] == selected_province]
+            
+            if selected_zone != "Toutes les zones" and 'q011b' in df_bczs.columns:
+                df_bczs_filtered = df_bczs_filtered[df_bczs_filtered['q011b'] == selected_zone]
+        
+        # Afficher les statistiques
+        if not df_bczs_filtered.empty:
+            st.metric("Zones de Santé", len(df_bczs_filtered))
+            if 'Score Global' in calculate_quality_score(df_bczs_filtered):
+                score = calculate_quality_score(df_bczs_filtered)['Score Global']
+                st.metric("Score moyen BCZS", f"{score:.1f}%")
+        
+        if not df_cdt_filtered.empty:
+            st.metric("Centres CDT", len(df_cdt_filtered))
+            if 'Score Global CDT' in calculate_cdt_quality_score(df_cdt_filtered):
+                score = calculate_cdt_quality_score(df_cdt_filtered)['Score Global CDT']
+                st.metric("Score moyen CDT", f"{score:.1f}%")
+        
+        st.markdown("---")
+        
+        # ============================================================================
+        # OPTIONS D'EXPORT
+        # ============================================================================
+        st.markdown("### 💾 EXPORTER LES DONNÉES")
+        
+        if not df_bczs_filtered.empty:
+            csv_bczs = df_bczs_filtered.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Données BCZS filtrées",
+                data=csv_bczs,
+                file_name=f"bczs_{selected_province.replace(' ', '_')}.csv",
+                mime="text/csv",
+                help="Télécharger les données BCZS pour la province sélectionnée"
+            )
+        
+        if not df_cdt_filtered.empty:
+            csv_cdt = df_cdt_filtered.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Données CDT filtrées",
+                data=csv_cdt,
+                file_name=f"cdt_{selected_province.replace(' ', '_')}.csv",
+                mime="text/csv",
+                help="Télécharger les données CDT pour la province sélectionnée"
+            )
+        
+        st.markdown("---")
+        
+        # ============================================================================
+        # RECHARGEMENT DES DONNÉES
+        # ============================================================================
+        st.markdown("### 🔄 ACTUALISER")
+        
+        if st.button("🔄 Recharger toutes les données"):
+            st.session_state.clear()
+            st.rerun()
+    
+    # ============================================================================
+    # FILTRE CONTEXTUEL - Afficher en haut de la page
+    # ============================================================================
+    if selected_province != all_provinces_option:
+        filter_text = f"**📍 Filtre actuel :** {selected_province}"
+        if selected_zone != "Toutes les zones":
+            filter_text += f" → {selected_zone}"
+        
+        st.info(filter_text)
+    
+    # ============================================================================
+    # ONGLETS PRINCIPAUX
+    # ============================================================================
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "🏥 BCZS - Synthèse", 
         "📈 BCZS - Analyse détaillée", 
@@ -1383,20 +1524,40 @@ def main():
         "🔗 Comparaison multi-niveaux"
     ])
     
-    # Charger les données
-    if 'df_bczs' not in st.session_state:
-        with st.spinner('Chargement des données...'):
-            df_bczs, df_cdt = load_data()
-    else:
-        df_bczs = st.session_state.df_bczs
-        df_cdt = st.session_state.get('df_cdt', pd.DataFrame())
+    # ============================================================================
+    # APPLIQUER LES FILTRES POUR TOUS LES ONGLETS
+    # ============================================================================
+    # Créer des copies filtrées pour chaque onglet
+    df_bczs_filtered = df_bczs.copy()
+    df_cdt_filtered = df_cdt.copy()
     
-    # TAB 1: SYNTHÈSE BCZS
+    if selected_province != all_provinces_option:
+        if not df_bczs.empty and 'q010b' in df_bczs.columns:
+            df_bczs_filtered = df_bczs_filtered[df_bczs_filtered['q010b'] == selected_province]
+        
+        if not df_cdt.empty and 'q010b' in df_cdt.columns:
+            df_cdt_filtered = df_cdt_filtered[df_cdt_filtered['q010b'] == selected_province]
+        
+        if selected_zone != "Toutes les zones" and 'q011b' in df_bczs.columns:
+            df_bczs_filtered = df_bczs_filtered[df_bczs_filtered['q011b'] == selected_zone]
+    
+    # ============================================================================
+    # TAB 1: SYNTHÈSE BCZS (avec filtres)
+    # ============================================================================
     with tab1:
-        if not df_bczs.empty:
-            st.markdown('<h2 class="section-title">📈 SYNTHÈSE GLOBALE BCZS</h2>', unsafe_allow_html=True)
+        if not df_bczs_filtered.empty:
+            # Afficher le titre avec la province si filtrée
+            if selected_province != all_provinces_option:
+                title = f"📈 SYNTHÈSE BCZS - {selected_province}"
+                if selected_zone != "Toutes les zones":
+                    title += f" ({selected_zone})"
+            else:
+                title = "📈 SYNTHÈSE GLOBALE BCZS"
             
-            scores = calculate_quality_score(df_bczs)
+            st.markdown(f'<h2 class="section-title">{title}</h2>', unsafe_allow_html=True)
+            
+            # Le reste de votre code pour TAB 1, en utilisant df_bczs_filtered
+            scores = calculate_quality_score(df_bczs_filtered)
             
             if not scores.empty:
                 st.markdown("#### 🎯 INDICATEURS CLÉS DE PERFORMANCE")
@@ -1460,21 +1621,23 @@ def main():
                             </div>
                             """, unsafe_allow_html=True)
                 
-                st.markdown("#### 🗺️ PERFORMANCE PAR PROVINCE")
-                province_fig, province_df = create_province_analysis(df_bczs)
-                
-                if province_fig:
-                    col_map, col_table = st.columns([2, 1])
+                # Analyse par province si on est en vue globale
+                if selected_province == all_provinces_option:
+                    st.markdown("#### 🗺️ PERFORMANCE PAR PROVINCE")
+                    province_fig, province_df = create_province_analysis(df_bczs_filtered)
                     
-                    with col_map:
-                        st.plotly_chart(province_fig, use_container_width=True)
-                    
-                    with col_table:
-                        if province_df is not None:
-                            top_provinces = province_df.nlargest(5, 'Score Global')
-                            st.markdown("**🏆 Top 5 provinces**")
-                            for i, (_, row) in enumerate(top_provinces.iterrows(), 1):
-                                st.markdown(f"{i}. **{row['Province']}**: {row['Score Global']:.1f}%")
+                    if province_fig:
+                        col_map, col_table = st.columns([2, 1])
+                        
+                        with col_map:
+                            st.plotly_chart(province_fig, use_container_width=True)
+                        
+                        with col_table:
+                            if province_df is not None:
+                                top_provinces = province_df.nlargest(5, 'Score Global')
+                                st.markdown("**🏆 Top 5 provinces**")
+                                for i, (_, row) in enumerate(top_provinces.iterrows(), 1):
+                                    st.markdown(f"{i}. **{row['Province']}**: {row['Score Global']:.1f}%")
                 
                 st.markdown("#### 💡 RECOMMANDATIONS PRIORITAIRES")
                 
@@ -1498,15 +1661,26 @@ def main():
                     </div>
                     """, unsafe_allow_html=True)
         else:
-            st.warning("⏳ Aucune donnée BCZS disponible")
+            st.warning("⏳ Aucune donnée BCZS disponible pour cette sélection")
     
-    # TAB 2: ANALYSE DÉTAILLÉE BCZS
+    # ============================================================================
+    # TAB 2: ANALYSE DÉTAILLÉE BCZS (avec filtres)
+    # ============================================================================
     with tab2:
-        if not df_bczs.empty:
-            st.markdown('<h2 class="section-title">🔍 ANALYSE DÉTAILLÉE BCZS</h2>', unsafe_allow_html=True)
+        if not df_bczs_filtered.empty:
+            # Afficher le titre avec la province si filtrée
+            if selected_province != all_provinces_option:
+                title = f"🔍 ANALYSE DÉTAILLÉE BCZS - {selected_province}"
+                if selected_zone != "Toutes les zones":
+                    title += f" ({selected_zone})"
+            else:
+                title = "🔍 ANALYSE DÉTAILLÉE BCZS"
             
+            st.markdown(f'<h2 class="section-title">{title}</h2>', unsafe_allow_html=True)
+            
+            # Utiliser les données filtrées
             st.markdown("#### 🎯 CONNAISSANCE DES INDICATEURS TB")
-            heatmap_fig, knowledge_df = create_knowledge_heatmap(df_bczs)
+            heatmap_fig, knowledge_df = create_knowledge_heatmap(df_bczs_filtered)
             
             if heatmap_fig:
                 col_chart, col_stats = st.columns([3, 1])
@@ -1522,7 +1696,7 @@ def main():
                             st.markdown(f"• {row['Indicateur']}: {row['Score total']:.1f}%")
             
             st.markdown("#### 🎓 FORMATION DU PERSONNEL")
-            training_fig, training_df = create_training_analysis(df_bczs)
+            training_fig, training_df = create_training_analysis(df_bczs_filtered)
             
             if training_fig:
                 st.plotly_chart(training_fig, use_container_width=True)
@@ -1544,23 +1718,30 @@ def main():
             
             st.markdown("#### 📋 DONNÉES BRUTES")
             
-            with st.expander("Afficher les données BCZS"):
-                st.dataframe(df_bczs, use_container_width=True)
+            with st.expander("Afficher les données BCZS filtrées"):
+                st.dataframe(df_bczs_filtered, use_container_width=True)
                 
                 st.markdown("##### 📊 Statistiques descriptives")
-                numeric_cols = df_bczs.select_dtypes(include=[np.number]).columns
+                numeric_cols = df_bczs_filtered.select_dtypes(include=[np.number]).columns
                 if len(numeric_cols) > 0:
-                    st.dataframe(df_bczs[numeric_cols].describe(), use_container_width=True)
-        
+                    st.dataframe(df_bczs_filtered[numeric_cols].describe(), use_container_width=True)
         else:
-            st.warning("⏳ Aucune donnée BCZS disponible")
+            st.warning("⏳ Aucune donnée BCZS disponible pour cette sélection")
     
-    # TAB 3: SYNTHÈSE CDT
+    # ============================================================================
+    # TAB 3: SYNTHÈSE CDT (avec filtres)
+    # ============================================================================
     with tab3:
-        st.markdown('<h2 class="section-title">🏘️ CDT - SYNTHÈSE ET INDICATEURS CLÉS</h2>', unsafe_allow_html=True)
+        # Afficher le titre avec la province si filtrée
+        if selected_province != all_provinces_option:
+            title = f"🏘️ CDT - SYNTHÈSE - {selected_province}"
+        else:
+            title = "🏘️ CDT - SYNTHÈSE ET INDICATEURS CLÉS"
         
-        if not df_cdt.empty:
-            cdt_scores = calculate_cdt_quality_score(df_cdt)
+        st.markdown(f'<h2 class="section-title">{title}</h2>', unsafe_allow_html=True)
+        
+        if not df_cdt_filtered.empty:
+            cdt_scores = calculate_cdt_quality_score(df_cdt_filtered)
             
             if not cdt_scores.empty:
                 st.markdown("#### 🎯 INDICATEURS CLÉS CDT")
@@ -1584,9 +1765,6 @@ def main():
                         <div class="metric-box">
                             <div class="metric-label-dark">Documents disponibles</div>
                             <div class="metric-value-dark">{cdt_scores['Documents sources disponibles']:.1f}%</div>
-                            <div style="background: #e5e7eb; height: 8px; border-radius: 4px; margin-top: 10px;">
-                                <div style="background: #059669; width: {cdt_scores['Documents sources disponibles']}%; height: 100%; border-radius: 4px;"></div>
-                            </div>
                         </div>
                         """, unsafe_allow_html=True)
                 
@@ -1596,9 +1774,6 @@ def main():
                         <div class="metric-box">
                             <div class="metric-label-dark">Connaissance indicateurs</div>
                             <div class="metric-value-dark">{cdt_scores['Connaissance indicateurs CDT']:.1f}%</div>
-                            <div style="background: #e5e7eb; height: 8px; border-radius: 4px; margin-top: 10px;">
-                                <div style="background: #059669; width: {cdt_scores['Connaissance indicateurs CDT']}%; height: 100%; border-radius: 4px;"></div>
-                            </div>
                         </div>
                         """, unsafe_allow_html=True)
                 
@@ -1608,9 +1783,6 @@ def main():
                         <div class="metric-box">
                             <div class="metric-label-dark">Rapportage régulier</div>
                             <div class="metric-value-dark">{cdt_scores['Rapportage régulier']:.1f}%</div>
-                            <div style="background: #e5e7eb; height: 8px; border-radius: 4px; margin-top: 10px;">
-                                <div style="background: #059669; width: {cdt_scores['Rapportage régulier']}%; height: 100%; border-radius: 4px;"></div>
-                            </div>
                         </div>
                         """, unsafe_allow_html=True)
                 
@@ -1623,7 +1795,8 @@ def main():
                 
                 with cdt_tab1:
                     st.markdown("#### 🗺️ RÉPARTITION GÉOGRAPHIQUE")
-                    geo_fig, province_df, zone_df = create_cdt_geographical_analysis(df_cdt)
+                    # Utiliser les données filtrées pour l'analyse géographique
+                    geo_fig, province_df, zone_df = create_cdt_geographical_analysis(df_cdt_filtered)
                     
                     if geo_fig:
                         st.plotly_chart(geo_fig, use_container_width=True)
@@ -1632,10 +1805,8 @@ def main():
                         
                         with col_geo1:
                             if not province_df.empty:
-                                st.markdown("**📈 Top provinces**")
-                                top_provinces = province_df.nlargest(5, 'Score Global')
-                                for i, (_, row) in enumerate(top_provinces.iterrows(), 1):
-                                    st.markdown(f"{i}. **{row['Province']}**: {row['Score Global']:.1f}% ({row['Nombre CDT']} CDT)")
+                                st.markdown("**📈 Performance par province**")
+                                st.dataframe(province_df[['Province', 'Score Global', 'Nombre CDT']], use_container_width=True)
                         
                         with col_geo2:
                             if not zone_df.empty:
@@ -1644,7 +1815,7 @@ def main():
                 
                 with cdt_tab2:
                     st.markdown("#### 📁 DISPONIBILITÉ DES DOCUMENTS SOURCES")
-                    doc_fig, doc_df = create_cdt_document_analysis(df_cdt)
+                    doc_fig, doc_df = create_cdt_document_analysis(df_cdt_filtered)
                     
                     if doc_fig:
                         st.plotly_chart(doc_fig, use_container_width=True)
@@ -1664,13 +1835,13 @@ def main():
                 
                 with cdt_tab3:
                     st.markdown("#### 🎓 FORMATION DU PERSONNEL")
-                    training_fig, training_df = create_cdt_training_analysis(df_cdt)
+                    training_fig, training_df = create_cdt_training_analysis(df_cdt_filtered)
                     
                     if training_fig:
                         st.plotly_chart(training_fig, use_container_width=True)
                     
                     st.markdown("#### 📤 RAPPORTAGE DES DONNÉES")
-                    reporting_fig, reporting_df, means_df = create_cdt_reporting_analysis(df_cdt)
+                    reporting_fig, reporting_df, means_df = create_cdt_reporting_analysis(df_cdt_filtered)
                     
                     if reporting_fig:
                         st.plotly_chart(reporting_fig, use_container_width=True)
@@ -1678,19 +1849,19 @@ def main():
                 with cdt_tab4:
                     st.markdown("#### 📋 DONNÉES BRUTES CDT")
                     
-                    with st.expander("Afficher toutes les données CDT"):
-                        st.dataframe(df_cdt, use_container_width=True)
+                    with st.expander("Afficher toutes les données CDT filtrées"):
+                        st.dataframe(df_cdt_filtered, use_container_width=True)
                         
                         st.markdown("##### 📊 Statistiques descriptives")
-                        numeric_cols = df_cdt.select_dtypes(include=[np.number]).columns
+                        numeric_cols = df_cdt_filtered.select_dtypes(include=[np.number]).columns
                         if len(numeric_cols) > 0:
-                            st.dataframe(df_cdt[numeric_cols].describe(), use_container_width=True)
+                            st.dataframe(df_cdt_filtered[numeric_cols].describe(), use_container_width=True)
                     
-                    csv = df_cdt.to_csv(index=False).encode('utf-8')
+                    csv = df_cdt_filtered.to_csv(index=False).encode('utf-8')
                     st.download_button(
-                        label="📥 Télécharger les données CDT (CSV)",
+                        label="📥 Télécharger les données CDT filtrées (CSV)",
                         data=csv,
-                        file_name="drc_pnlt_rdqa_cdt_analyse.csv",
+                        file_name=f"cdt_filtre_{selected_province.replace(' ', '_')}.csv",
                         mime="text/csv"
                     )
                 
@@ -1715,112 +1886,98 @@ def main():
                         <p><strong>Cible:</strong> 80% du personnel connaît les 10 indicateurs clés</p>
                     </div>
                     """, unsafe_allow_html=True)
-                
-                if 'Rapportage régulier' in cdt_scores and cdt_scores['Rapportage régulier'] < 80:
-                    st.markdown("""
-                    <div class="highlight-box">
-                        <h4>📤 PRIORITÉ 3 - RAPPORTAGE RÉGULIER</h4>
-                        <p><strong>Problème:</strong> Taux de rapportage insuffisant</p>
-                        <p><strong>Action recommandée:</strong> Système de suivi et rappels automatiques</p>
-                        <p><strong>Cible:</strong> 95% des CDT rapportent mensuellement</p>
-                    </div>
-                    """, unsafe_allow_html=True)
             
         else:
             st.markdown("""
             <div class="highlight-box">
-                <h4>📁 CHARGEMENT DES DONNÉES CDT</h4>
-                <p>Pour analyser les données des Centres de Diagnostic et Traitement :</p>
+                <h4>📁 DONNÉES CDT NON DISPONIBLES</h4>
+                <p>Aucune donnée CDT disponible pour cette sélection.</p>
+                <p>Options disponibles:</p>
                 <ol>
-                    <li>Le fichier doit être au format CSV avec les colonnes du XLSForm CDT</li>
-                    <li>Les colonnes doivent commencer par <code>q001a</code>, <code>q010a</code>, etc.</li>
-                    <li>Assurez-vous que les données sont au format WIDE (une ligne par CDT)</li>
+                    <li>Sélectionnez une autre province</li>
+                    <li>Retirez le filtre de province</li>
+                    <li>Chargez des données CDT dans l'onglet principal</li>
                 </ol>
             </div>
             """, unsafe_allow_html=True)
-            
-            uploaded_file = st.file_uploader(
-                "Téléchargez votre fichier CDT:",
-                type=['csv', 'xlsx'],
-                key="cdt_upload",
-                help="Format attendu: CSV ou Excel avec colonnes q100, q101, q102, etc."
-            )
-            
-            if uploaded_file is not None:
-                try:
-                    if uploaded_file.name.endswith('.csv'):
-                        df_cdt_uploaded = pd.read_csv(uploaded_file, encoding='utf-8')
-                    else:
-                        df_cdt_uploaded = pd.read_excel(uploaded_file)
-                    
-                    required_cols = ['q100', 'q101', 'q102', 'q103', 'q104']
-                    missing_cols = [col for col in required_cols if col not in df_cdt_uploaded.columns]
-                    
-                    if missing_cols:
-                        st.warning(f"⚠️ Colonnes manquantes: {', '.join(missing_cols)}")
-                        st.info("Le fichier devrait contenir les questions du questionnaire CDT")
-                    else:
-                        st.session_state.df_cdt = df_cdt_uploaded
-                        st.success(f"✅ Données CDT chargées: {len(df_cdt_uploaded)} centres")
-                        st.rerun()
-                        
-                except Exception as e:
-                    st.error(f"❌ Erreur de chargement: {str(e)}")
     
-    # TAB 4: GRAPHIQUES DÉTAILLÉS CDT
+    # ============================================================================
+    # TAB 4: GRAPHIQUES DÉTAILLÉS CDT (avec filtres)
+    # ============================================================================
     with tab4:
-        st.markdown('<h2 class="section-title">📊 ANALYSE DÉTAILLÉE PAR QUESTION - CDT</h2>', unsafe_allow_html=True)
+        # Afficher le titre avec la province si filtrée
+        if selected_province != all_provinces_option:
+            title = f"📊 CDT - GRAPHIQUES DÉTAILLÉS - {selected_province}"
+        else:
+            title = "📊 CDT - GRAPHIQUES DÉTAILLÉS"
         
-        if not df_cdt.empty:
+        st.markdown(f'<h2 class="section-title">{title}</h2>', unsafe_allow_html=True)
+        
+        if not df_cdt_filtered.empty:
             # Résumé statistique
             st.markdown("#### 📈 RÉSUMÉ STATISTIQUE")
             col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
             
             with col_stat1:
-                total_cdt = len(df_cdt)
-                st.metric("Total CDT analysés", total_cdt)
+                total_cdt = len(df_cdt_filtered)
+                st.metric("CDT analysés", total_cdt)
             
             with col_stat2:
-                response_rates = {}
-                for col in df_cdt.columns:
-                    if col.startswith('q'):
-                        total = len(df_cdt)
-                        answered = df_cdt[col].count()
-                        response_rates[col] = answered / total * 100 if total > 0 else 0
-                
-                avg_response_rate = np.mean(list(response_rates.values())) if response_rates else 0
-                st.metric("Taux réponse moyen", f"{avg_response_rate:.1f}%")
+                question_cols = [col for col in df_cdt_filtered.columns if col.startswith('q')]
+                st.metric("Questions", len(question_cols))
             
             with col_stat3:
-                question_cols = [col for col in df_cdt.columns if col.startswith('q')]
-                st.metric("Questions disponibles", len(question_cols))
+                cdt_scores = calculate_cdt_quality_score(df_cdt_filtered)
+                if 'Score Global CDT' in cdt_scores:
+                    st.metric("Score global", f"{cdt_scores['Score Global CDT']:.1f}%")
             
             with col_stat4:
-                cdt_scores = calculate_cdt_quality_score(df_cdt)
-                if 'Score Global CDT' in cdt_scores:
-                    st.metric("Score global CDT", f"{cdt_scores['Score Global CDT']:.1f}%")
+                if 'q100' in df_cdt_filtered.columns:
+                    taux_responsabilite = (df_cdt_filtered['q100'].isin([1, 2]).sum() / len(df_cdt_filtered)) * 100
+                    st.metric("Responsabilité claire", f"{taux_responsabilite:.1f}%")
             
-            # Structure et fonction du S&E
+            # Graphiques groupés
             st.markdown("### 📋 STRUCTURE ET FONCTION DU SUIVI & ÉVALUATION")
-            st.markdown("#### Q100-Q102: Organisation et responsabilités")
+            structure_fig = create_cdt_structure_chart(df_cdt_filtered)
+            if structure_fig:
+                st.plotly_chart(structure_fig, use_container_width=True)
             
-            structure_fig = create_cdt_structure_chart(df_cdt)
-            
-                        
-            # Connaissance des indicateurs
             st.markdown("---")
             st.markdown("### 🎯 CONNAISSANCE DES DÉFINITIONS D'INDICATEURS")
-            st.markdown("#### Q105_1 à Q105_10: Maîtrise des indicateurs TB")
+            knowledge_fig = create_cdt_knowledge_chart(df_cdt_filtered)
+            if knowledge_fig:
+                st.plotly_chart(knowledge_fig, use_container_width=True)
             
+            st.markdown("---")
+            st.markdown("### ✅ QUALITÉ DES DONNÉES ET SUPERVISION")
+            quality_fig = create_cdt_quality_chart(df_cdt_filtered)
+            if quality_fig:
+                st.plotly_chart(quality_fig, use_container_width=True)
             
+            st.markdown("---")
+            st.markdown("### 🔐 ARCHIVAGE ET CONFIDENTIALITÉ")
+            archive_fig = create_cdt_archive_chart(df_cdt_filtered)
+            if archive_fig:
+                st.plotly_chart(archive_fig, use_container_width=True)
+            
+        else:
+            st.warning("⏳ Aucune donnée CDT disponible pour cette sélection")
     
-    # TAB 5: COMPARAISON MULTI-NIVEAUX
+    # ============================================================================
+    # TAB 5: COMPARAISON MULTI-NIVEAUX (avec filtres)
+    # ============================================================================
     with tab5:
-        st.markdown('<h2 class="section-title">🔗 COMPARAISON MULTI-NIVEAUX</h2>', unsafe_allow_html=True)
+        # Afficher le titre avec la province si filtrée
+        if selected_province != all_provinces_option:
+            title = f"🔗 COMPARAISON MULTI-NIVEAUX - {selected_province}"
+        else:
+            title = "🔗 COMPARAISON MULTI-NIVEAUX"
         
-        if not df_bczs.empty and not df_cdt.empty:
-            bczs_scores = calculate_quality_score(df_bczs)
-            cdt_scores = calculate_cdt_quality_score(df_cdt)
+        st.markdown(f'<h2 class="section-title">{title}</h2>', unsafe_allow_html=True)
+        
+        if not df_bczs_filtered.empty and not df_cdt_filtered.empty:
+            bczs_scores = calculate_quality_score(df_bczs_filtered)
+            cdt_scores = calculate_cdt_quality_score(df_cdt_filtered)
             
             comparison_data = []
             
@@ -1877,11 +2034,11 @@ def main():
                 
                 max_gap = comp_df.loc[comp_df['Écart'].abs().idxmax()]
                 if max_gap['Écart'] > 10:
-                    st.info(f"**Plus grande différence:** {max_gap['Indicateur']} - CDT score {max_gap['Écart']:.1f} points de plus")
+                    st.info(f"**Plus grande différence:** {max_gap['Indicateur']} - CDT score {max_gap['Écart']:.1f} points de plus que BCZS")
                 elif max_gap['Écart'] < -10:
-                    st.warning(f"**Plus grande différence:** {max_gap['Indicateur']} - CDT score {-max_gap['Écart']:.1f} points de moins")
-                
-                st.markdown("#### 💡 RECOMMANDATIONS INTÉGRÉES")
+                    st.warning(f"**Plus grande différence:** {max_gap['Indicateur']} - CDT score {-max_gap['Écart']:.1f} points de moins que BCZS")
+                else:
+                    st.success("**Performance équilibrée:** Les scores BCZS et CDT sont similaires")
                 
                 avg_bczs = bczs_scores.get('Score Global', 0)
                 avg_cdt = cdt_scores.get('Score Global CDT', 0)
@@ -1890,11 +2047,12 @@ def main():
                     st.markdown("""
                     <div class="highlight-box">
                         <h4>✅ POINT FORT - PERFORMANCE CDT</h4>
-                        <p>Les CDT performent mieux que les BCZS. Capitalisez sur cette force en :</p>
+                        <p>Les CDT performent mieux que les BCZS dans cette sélection.</p>
+                        <p><strong>Recommandations:</strong></p>
                         <ul>
-                            <li>Documentant les bonnes pratiques des CDT performants</li>
-                            <li>Organisant des échanges BCZS-CDT</li>
-                            <li>Utilisant les CDT comme sites démonstratifs</li>
+                            <li>Documenter les bonnes pratiques des CDT performants</li>
+                            <li>Organiser des échanges BCZS-CDT</li>
+                            <li>Utiliser les CDT comme sites démonstratifs</li>
                         </ul>
                     </div>
                     """, unsafe_allow_html=True)
@@ -1902,7 +2060,8 @@ def main():
                     st.markdown("""
                     <div class="highlight-box">
                         <h4>⚠️ DÉFI - RENFORCEMENT CDT</h4>
-                        <p>Les CDT sont en retard par rapport aux BCZS. Priorités :</p>
+                        <p>Les CDT sont en retard par rapport aux BCZS dans cette sélection.</p>
+                        <p><strong>Recommandations:</strong></p>
                         <ul>
                             <li>Renforcer l'appui technique des BCZS aux CDT</li>
                             <li>Simplifier les procédures pour les CDT</li>
@@ -1911,23 +2070,22 @@ def main():
                     </div>
                     """, unsafe_allow_html=True)
         else:
-            st.info("📋 Pour la comparaison, chargez à la fois les données BCZS et CDT")
+            st.info("📋 Pour la comparaison, les données BCZS et CDT doivent être disponibles pour cette sélection.")
     
-    # Footer
+    # ============================================================================
+    # FOOTER
+    # ============================================================================
     st.markdown("---")
     st.markdown("""
     <div style="text-align: center; color: #666; font-size: 0.9rem; padding: 1rem;">
         <p>📋 <strong>Programme National de Lutte contre la Tuberculose (PNLT)</strong> - République Démocratique du Congo</p>
         <p>📞 Contact technique: Fabien Kabasele, +243974061912 | 📧 fabiennkabasele@gmail.com</p>
-        <p>🔄 Données actualisées le: {date} | 📊 BCZS analysés: {n_bczs} | 🏘️ CDT analysés: {n_cdt}</p>
-        <p>📈 Score moyen BCZS: {score_bczs} | 🏥 Score moyen CDT: {score_cdt}</p>
+        <p>🔄 Données actualisées le: {date} | 📊 ZS analysées: {n_bczs} | 🏘️ CDT analysés: {n_cdt}</p>
     </div>
     """.format(
         date=pd.Timestamp.now().strftime('%d/%m/%Y %H:%M'),
-        n_bczs=len(df_bczs) if not df_bczs.empty else 0,
-        n_cdt=len(df_cdt) if not df_cdt.empty else 0,
-        score_bczs=f"{calculate_quality_score(df_bczs).get('Score Global', 0):.1f}%" if not df_bczs.empty else "N/A",
-        score_cdt=f"{calculate_cdt_quality_score(df_cdt).get('Score Global CDT', 0):.1f}%" if not df_cdt.empty else "N/A"
+        n_bczs=len(df_bczs_filtered),
+        n_cdt=len(df_cdt_filtered)
     ), unsafe_allow_html=True)
 
 # ============================================================================
